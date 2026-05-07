@@ -1011,8 +1011,16 @@ Rules:
           throw new Error(msg);
         }
         const data = await res.json();
-        const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-        return JSON.parse(raw.replace(/```json|```/g, '').trim());
+        let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+        
+        // Robust Extraction: Find the JSON array within the text
+        const start = raw.indexOf('[');
+        const end = raw.lastIndexOf(']');
+        if (start !== -1 && end !== -1) {
+          raw = raw.substring(start, end + 1);
+        }
+        
+        return JSON.parse(raw.trim());
       } catch (e) { 
         if (e.message.toLowerCase().includes('not found')) {
           lastErr = e.message;
