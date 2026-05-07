@@ -441,6 +441,46 @@ nav{
 .att-row:last-child{border-bottom:none;}
 .att-score{font-family:'JetBrains Mono',monospace;font-weight:700;}
 
+/* Palette & Tabs */
+.sub-tabs{
+  display:flex;gap:4px;padding:8px 16px;overflow-x:auto;
+  background:var(--card);border-bottom:1px solid var(--border);
+  position:sticky;top:60px;z-index:90;scrollbar-width:none;
+}
+.sub-tabs::-webkit-scrollbar{display:none;}
+.sub-tab{
+  padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;
+  white-space:nowrap;color:var(--text3);cursor:pointer;transition:all .2s;
+}
+.sub-tab.active{background:rgba(124,109,240,0.15);color:var(--accent2);}
+
+.palette-overlay{
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,0.6);z-index:200;display:none;backdrop-filter:blur(4px);
+}
+.palette-drawer{
+  position:fixed;top:0;right:-320px;width:320px;height:100%;
+  background:var(--bg);border-left:1px solid var(--border);
+  z-index:201;transition:right .3s ease;display:flex;flex-direction:column;
+}
+.palette-drawer.open{right:0;}
+.palette-header{padding:20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);}
+.palette-grid{padding:20px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px;overflow-y:auto;flex:1;}
+.palette-num{
+  aspect-ratio:1;border-radius:8px;border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;
+  cursor:pointer;transition:all .2s;background:var(--surface);
+}
+.palette-num.visited{background:rgba(239,68,68,0.15);border-color:var(--red);color:var(--red);}
+.palette-num.answered{background:rgba(16,185,129,0.15);border-color:var(--green);color:var(--green);}
+.palette-num:hover{border-color:var(--accent);}
+
+.palette-legend{padding:20px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.leg-item{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;}
+.leg-dot{width:8px;height:8px;border-radius:50%;background:var(--border);}
+.leg-dot.r{background:var(--red);}
+.leg-dot.g{background:var(--green);}
+
 /* ── RESULT SCREEN ───────────────────────── */
 #resultScreen .result-body{
   flex:1;max-width:800px;width:100%;
@@ -660,14 +700,15 @@ nav{
   <nav>
     <div class="nav-left">
       <button class="nav-btn" onclick="quitTest()">← Home</button>
+      <button class="nav-btn" onclick="togglePalette()">☰ Palette</button>
     </div>
     <div class="logo" onclick="quitTest()" style="cursor:pointer">Test<span>Forge</span></div>
-    <div class="test-nav-title" id="testNavTitle" style="display:none">TestForge</div>
     <div class="nav-right">
       <div class="test-progress-pill" id="testProgressPill">0/0</div>
       <button class="nav-btn primary" onclick="submitTest()">Submit</button>
     </div>
   </nav>
+  <div class="sub-tabs" id="subTabs"></div>
   <div class="progress-bar"><div class="progress-bar-fill" id="progressFill"></div></div>
   <div class="test-body" id="testBody"></div>
   <div class="bottom-bar">
@@ -676,6 +717,21 @@ nav{
       <button class="bb-btn" onclick="scrollTo({top:0,behavior:'smooth'})">↑ Top</button>
       <button class="bb-btn primary" onclick="submitTest()">Submit Test →</button>
     </div>
+  </div>
+</div>
+
+<!-- ══ PALETTE DRAWER ════════════════════════ -->
+<div class="palette-overlay" id="paletteOverlay" onclick="togglePalette()"></div>
+<div class="palette-drawer" id="paletteDrawer">
+  <div class="palette-header">
+    <div class="stat-lbl">Question Palette</div>
+    <button class="nav-btn" onclick="togglePalette()">×</button>
+  </div>
+  <div class="palette-grid" id="paletteGrid"></div>
+  <div class="palette-legend">
+    <div class="leg-item"><div class="leg-dot"></div> Not Visited</div>
+    <div class="leg-item"><div class="leg-dot r"></div> Not Answered</div>
+    <div class="leg-item"><div class="leg-dot g"></div> Answered</div>
   </div>
 </div>
 
@@ -727,6 +783,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 let selectedFiles = [];
 let currentTest = null; 
 let userAnswers = [];
+let visited = []; // Track visited questions
 
 // ══ INDEXEDDB WRAPPER ═════════════════════════════════
 const DB = {
@@ -964,7 +1021,7 @@ For each question:
 - "opts": Exactly 4 options.
 - "ans": 0-based index of the correct answer.
 - "sol": Detailed solution/explanation.
-- "sub": Auto-detect the subject (e.g., "Maths", "Physics", "Chemistry", "Engineering").
+- "sub": Auto-detect the subject. You MUST only use one of these 4 exact labels: "Maths", "Physics", "Chemistry", or "Engineering". (Map all technical/branch-specific questions to "Engineering").
 - "bbox": The [ymin, xmin, ymax, xmax] coordinates (0-1000) for visual elements. 
   * RULE 1: Only include a bbox if there is a visual diagram, graph, or circuit.
   * RULE 2: If options are just text, do NOT include them in the bbox.
@@ -1280,18 +1337,58 @@ function scrollToHistory() {
 function startTest(test) {
   currentTest = test;
   userAnswers = new Array(test.questions.length).fill(-1);
+  visited = new Array(test.questions.length).fill(false);
+  visited[0] = true;
   renderTest();
   showScreen('testScreen');
 }
 
-function renderTest() {
-  const { title, questions } = currentTest;
-  document.getElementById('testNavTitle').textContent = title;
+function renderSubTabs() {
+  const tabs = document.getElementById('subTabs');
+  const questions = currentTest.questions;
+  const groups = {};
+  questions.forEach((q, i) => {
+    const s = q.sub || 'General';
+    if (!groups[s]) groups[s] = { first: i, name: s };
+  });
 
+  tabs.innerHTML = Object.values(groups).map(g => `
+    <div class="sub-tab" onclick="jumpTo(${g.first})">${g.name}</div>
+  `).join('');
+}
+
+function togglePalette() {
+  const d = document.getElementById('paletteDrawer');
+  const o = document.getElementById('paletteOverlay');
+  const isOpen = d.classList.toggle('open');
+  o.style.display = isOpen ? 'block' : 'none';
+  if (isOpen) renderPalette();
+}
+
+function renderPalette() {
+  const grid = document.getElementById('paletteGrid');
+  grid.innerHTML = currentTest.questions.map((_, i) => {
+    const isAnswered = userAnswers[i] !== -1;
+    const isVisited = visited[i];
+    const cls = isAnswered ? 'answered' : (isVisited ? 'visited' : '');
+    return `<div class="palette-num ${cls}" onclick="jumpTo(${i});togglePalette()">${i+1}</div>`;
+  }).join('');
+}
+
+function jumpTo(idx) {
+  const el = document.getElementById(`qcard-${idx}`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    visited[idx] = true;
+    renderPalette();
+  }
+}
+
+function renderTest() {
+  const { questions } = currentTest;
   const LTRS = ['A','B','C','D'];
   let html = '';
   
-  // Group by subject
   const groups = {};
   questions.forEach((q, i) => {
     const s = q.sub || 'General';
@@ -1304,7 +1401,7 @@ function renderTest() {
     qs.forEach(({q, i}) => {
       let imgHtml = q.croppedImg ? `<img class="q-image" src="${q.croppedImg}" alt="Diagram" loading="lazy">` : '';
       html += `
-      <div class="q-card" id="qcard-${i}">
+      <div class="q-card" id="qcard-${i}" onclick="visited[${i}]=true;renderPalette()">
         <div class="q-top">
           <div class="q-num">Q${i+1}</div>
           <div class="q-text">${escHtml(q.q)}</div>
@@ -1322,16 +1419,20 @@ function renderTest() {
   }
 
   document.getElementById('testBody').innerHTML = html;
+  renderSubTabs();
+  renderPalette();
   updateProgress();
 }
 
 function pick(qi, oi) {
   userAnswers[qi] = oi;
+  visited[qi] = true;
   const opts = document.querySelectorAll(`#qcard-${qi} .opt`);
   opts.forEach(o => o.classList.remove('selected'));
   document.getElementById(`opt-${qi}-${oi}`)?.classList.add('selected');
   document.getElementById(`qcard-${qi}`)?.classList.add('answered');
   updateProgress();
+  renderPalette();
 }
 
 function updateProgress() {
