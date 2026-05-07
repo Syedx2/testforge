@@ -1028,6 +1028,8 @@ For each question:
   * RULE 3: ONLY include options in the bbox if they are purely visual/graphical (like in Q.19).
   * RULE 4: Strictly EXCLUDE anything from the "Sol:" or solution section.
 
+IMPORTANT: Your response MUST be a valid JSON array. Escape any double quotes inside text with a backslash (\"). Do NOT include trailing commas.
+
 Return ONLY a JSON array:
 [{"q":"...","opts":["...","...","...","..."],"ans":0,"sol":"...","bbox":[ymin,xmin,ymax,xmax]}]
 
@@ -1077,7 +1079,7 @@ Rules:
           raw = raw.substring(start, end + 1);
         }
         
-        return JSON.parse(raw.trim());
+        return JSON.parse(cleanJson(raw));
       } catch (e) { 
         if (e.message.toLowerCase().includes('not found')) {
           lastErr = e.message;
@@ -1614,6 +1616,12 @@ function showErr(msg) {
 }
 function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function cleanJson(str) {
+  // Remove trailing commas before ] or }
+  return str.trim()
+    .replace(/,\s*\]/g, ']')
+    .replace(/,\s*\}/g, '}');
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 </script>
